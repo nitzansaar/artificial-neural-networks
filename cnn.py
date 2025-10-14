@@ -61,34 +61,45 @@ b_fc = np.zeros((1,))
 lr = 0.001
 epochs = 5
 
-start = time.time()
+print("\n--- Training ---")
+train_start = time.time()
+
 for epoch in range(epochs):
     total_loss = 0
     for i in range(len(X_train)):
         img = X_train[i]
         label = np.array([y_train[i]])
 
+        # Forward pass
         conv_out = conv2d(img, conv_filter)
         relu_out = relu(conv_out)
         pooled = maxpool(relu_out)
         flat = pooled.flatten()
         y_pred = relu(np.dot(flat, W_fc) + b_fc)
 
+        # Compute loss
         loss = mse_loss(label, y_pred)
         total_loss += loss
 
+        # Backprop through FC layer only
         grad_y = mse_grad(label, y_pred) * relu_derivative(y_pred)
         grad_W = np.outer(flat, grad_y)
         grad_b = grad_y
 
+        # Update weights
         W_fc -= lr * grad_W
         b_fc -= lr * grad_b
 
     print(f"Epoch {epoch+1}/{epochs} | Loss: {total_loss/len(X_train):.4f}")
 
-print("Training time:", time.time() - start, "seconds")
+train_end = time.time()
+train_time = train_end - train_start
+print(f"Training time: {train_time:.2f} seconds")
 
 # ---------- 6. Evaluation ----------
+print("\n--- Evaluation ---")
+eval_start = time.time()
+
 correct = 0
 for i in range(len(X_test)):
     conv_out = conv2d(X_test[i], conv_filter)
@@ -100,5 +111,14 @@ for i in range(len(X_test)):
     if prediction == y_test[i]:
         correct += 1
 
+eval_end = time.time()
+eval_time = eval_end - eval_start
+
 accuracy = correct / len(X_test)
 print(f"Test Accuracy: {accuracy*100:.2f}%")
+print(f"Evaluation time: {eval_time:.2f} seconds")
+
+# ---------- 7. Summary ----------
+print("\n--- Summary ---")
+print(f"Device: CPU (NumPy)")
+print(f"Training time: {train_time:.2f} sec | Evaluation time: {eval_time:.2f} sec | Accuracy: {accuracy*100:.2f}%")
