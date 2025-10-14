@@ -120,3 +120,70 @@ def train(model, X, y, epochs=200, lr=1e-2, batch_size=64, weight_decay=0.0,
         if verbose and (e % max(1, epochs//10) == 0):
             print(f"epoch {e:4d}/{epochs} loss={L:.4f}")
     return losses
+
+
+def regression_example():
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    # --- Synthetic dataset ---
+    rng = np.random.default_rng(0)
+    X = rng.uniform(-2, 2, (400, 1))
+
+    def target(x):
+        return np.maximum(0, 0.5 * x + 0.2) + 0.3 * np.maximum(0, -x + 0.5)
+
+    y = target(X) + 0.05 * rng.normal(size=(400, 1))
+
+    # --- Create and train model ---
+    model = MLP2(in_dim=1, hidden_dim=32, out_dim=1, mode="regression", seed=1)
+    losses = train(model, X, y, epochs=500, lr=1e-2, batch_size=64, weight_decay=1e-4)
+
+    # --- Plot training loss ---
+    plt.plot(losses)
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Training Loss Curve")
+    plt.show()
+
+    # --- Test on a few points ---
+    xt = np.linspace(-2, 2, 9).reshape(-1, 1)
+    pred = model.forward(xt)
+    print("x | target(x) | predicted(x)")
+    print(np.hstack([xt, target(xt), pred]))
+
+
+def classification_example():
+    import numpy as np
+
+    # --- Two concentric rings (nonlinear) ---
+    def rings(n=800, inner_r=0.6, gap=0.5, noise=0.07, seed=1):
+        rng = np.random.default_rng(seed)
+        n2 = n // 2
+        theta1 = rng.uniform(0, 2 * np.pi, n2)
+        r1 = inner_r + noise * rng.normal(size=n2)
+        x1 = np.c_[r1 * np.cos(theta1), r1 * np.sin(theta1)]
+        theta2 = rng.uniform(0, 2 * np.pi, n - n2)
+        r2 = inner_r + gap + noise * rng.normal(size=n - n2)
+        x2 = np.c_[r2 * np.cos(theta2), r2 * np.sin(theta2)]
+        X = np.vstack([x1, x2])
+        y = np.array([0] * n2 + [1] * (n - n2))
+        return X, y
+
+    Xb, yb = rings()
+
+    # --- Create and train model ---
+    model = MLP2(in_dim=2, hidden_dim=64, out_dim=2, mode="classification", seed=2)
+    train(model, Xb, yb, epochs=200, lr=5e-3, batch_size=64, weight_decay=1e-4)
+
+    # --- Evaluate ---
+    probs = model.forward(Xb)
+    preds = probs.argmax(axis=1)
+    acc = (preds == yb).mean()
+    print(f"Training accuracy: {acc:.4f}")
+
+
+if __name__ == "__main__":
+    # Uncomment the example you want to run
+    # regression_example()``
+    classification_example()
