@@ -8,6 +8,7 @@ import time
 # ---------- 1. Device setup ----------
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
+torch.backends.cudnn.benchmark = True
 
 # ---------- 2. Data transforms ----------
 transform = transforms.Compose([
@@ -22,8 +23,24 @@ test_dir = "data/test"
 train_data = datasets.ImageFolder(root=train_dir, transform=transform)
 test_data = datasets.ImageFolder(root=test_dir, transform=transform)
 
-train_loader = DataLoader(train_data, batch_size=32, shuffle=True)
-test_loader = DataLoader(test_data, batch_size=32, shuffle=False)
+train_loader = DataLoader(
+    train_data,
+    batch_size=256,
+    shuffle=True,
+    num_workers=8,
+    pin_memory=True,
+    persistent_workers=True,
+    prefetch_factor=2,
+)
+test_loader = DataLoader(
+    test_data,
+    batch_size=256,
+    shuffle=False,
+    num_workers=8,
+    pin_memory=True,
+    persistent_workers=True,
+    prefetch_factor=2,
+)
 
 print(f"Train samples: {len(train_data)}, Test samples: {len(test_data)}")
 
@@ -36,22 +53,23 @@ class CatDogCNN(nn.Module):
         self.conv2 = nn.Conv2d(16, 32, 3, padding=1)
         self.pool = nn.MaxPool2d(2, 2)
         self.fc1 = nn.Linear(32 * 16 * 16, 64)
-        self.fc2 = nn.Linear(64, 1)      # binary output
+        self.fc2 = nn.Linear(64, 1)      # binary logit output
 
     def forward(self, x):
         x = self.pool(F.relu(self.conv1(x)))
         x = self.pool(F.relu(self.conv2(x)))
         x = x.view(x.size(0), -1)
         x = F.relu(self.fc1(x))
-        x = torch.sigmoid(self.fc2(x))
+        x = self.fc2(x)  # logits
         return x
 
 model = CatDogCNN().to(device)
 print(model)
 
 # ---------- 5. Loss & optimizer ----------
-criterion = nn.BCELoss()                     # binary cross entropy
+criterion = nn.BCEWithLogitsLoss()            # numerically stable
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
 
 # ---------- 6. Training loop ----------
 epochs = 5
@@ -60,12 +78,15 @@ for epoch in range(epochs):
     model.train()
     running_loss = 0.0
     for images, labels in train_loader:
-        images, labels = images.to(device), labels.to(device).float().unsqueeze(1)
-        optimizer.zero_grad()
-        outputs = model(images)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
+        images = images.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True).float().unsqueeze(1)
+        optimizer.zero_grad(set_to_none=True)
+        with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
         running_loss += loss.item()
     print(f"Epoch {epoch+1}/{epochs} | Loss: {running_loss/len(train_loader):.4f}")
 print("Training time:", time.time() - start, "seconds")
@@ -75,9 +96,11 @@ model.eval()
 correct, total = 0, 0
 with torch.no_grad():
     for images, labels in test_loader:
-        images, labels = images.to(device), labels.to(device)
+        images = images.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
         outputs = model(images)
-        preds = (outputs > 0.5).squeeze().long()
+        probs = torch.sigmoid(outputs)
+        preds = (probs > 0.5).squeeze().long()
         correct += (preds == labels).sum().item()
         total += labels.size(0)
 accuracy = correct / total
